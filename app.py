@@ -1,9 +1,8 @@
 import streamlit as st
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 import json
 from datetime import datetime
-import pandas as pd
 
 st.set_page_config(page_title="서울수려한치과", layout="wide")
 st.title("🏥 서울수려한치과 - 자동 문자 발송")
@@ -11,25 +10,21 @@ st.title("🏥 서울수려한치과 - 자동 문자 발송")
 @st.cache_resource
 def get_gsheet():
     try:
-        creds_dict = st.secrets["gsheet_creds"]
         scope = ['https://spreadsheets.google.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        gc = gspread.authorize(creds)
-        return gc.open_by_key(st.secrets["spreadsheet_id"])
+        creds_dict = st.secrets["gsheet_creds"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+        return client.open_by_key(st.secrets["spreadsheet_id"])
     except Exception as e:
         st.error(f"연동 오류: {e}")
         return None
 
 templates = {
-    '전화상담+예약': '안녕하세요 {환자명}님!\n저는 {담당자명}입니다.\n\n감사합니다. {예약일}에 예약해주신 내용 정리해드립니다.\n\n{개인정보}에 대해 잘 기억하고 있습니다.\n\n{걱정부분}에 대해서는 {해결책}으로 도움이 될 것 같습니다.\n\n{진료내용_링크}\n\n병원 위치: {병원위치}\n예약 변경: 010-6584-2874\n\n{예약일}에 뵙겠습니다!\n\n홈페이지: https://www.suryeohan.com/',
-    
-    '전화상담+미예약': '안녕하세요 {환자명}님!\n저는 {담당자명}입니다.\n\n감사합니다.\n\n{의구심부분}에 대해 고민이 많으신 것 같습니다.\n{공감_신뢰감}\n\n{해결책}으로 도움이 될 것입니다.\n\n{진료내용_링크}\n\n이번 기회에 치료를 받으시길 권유합니다!\n\n예약: http://map.naver.com/p/entry/place/21697698\n문의: 010-6584-2874',
-    
-    '내원상담+예약': '안녕하세요 {환자명}님!\n저는 {담당자명}입니다.\n\n오늘 내원해주셔서 감사합니다!\n\n{치료결정_감사}\n\n진행 계획:\n{치료계획}\n\n{진료내용_링크}\n\n신경 쓸 점: {특별주의사항}\n\n예약 변경: 010-6584-2874\n\n{예약일}에 뵙겠습니다!',
-    
-    '내원상담+미예약': '안녕하세요 {환자명}님!\n저는 {담당자명}입니다.\n\n오늘 내원해주셔서 감사합니다.\n\n{의구심부분}이 걱정되시는군요.\n\n{구체적해결책}으로 해결 가능합니다.\n\n{공감_사례}하셨습니다.\n\n{진료내용_링크}\n\n예약: http://map.naver.com/p/entry/place/21697698\n문의: 010-6584-2874',
-    
-    '리콜종료': '안녕하세요 {환자명}님!\n저는 {담당자명}입니다.\n\n지속적인 연락으로 불편을 드렸다면 사과드립니다.\n더 이상 연락드리지 않을 예정입니다.\n\n{치료미실행_아쉬움}\n\n{합병증경고}이 발생할 수 있습니다.\n\n치료가 필요하시면 언제든지 010-6584-2874로 연락주세요!'
+    '전화상담+예약': '안녕하세요 {환자명}님! 저는 {담당자명}입니다.\n\n감사합니다. {예약일}에 예약해주신 내용 정리해드립니다.\n\n{개인정보}에 대해 잘 기억하고 있습니다.\n\n{걱정부분}에 대해서는 {해결책}으로 도움이 될 것 같습니다.\n\n{진료내용_링크}\n\n병원 위치: {병원위치}\n예약 변경: 010-6584-2874\n\n{예약일}에 뵙겠습니다!\n\n홈페이지: https://www.suryeohan.com/',
+    '전화상담+미예약': '안녕하세요 {환자명}님! 저는 {담당자명}입니다.\n\n감사합니다.\n\n{의구심부분}에 대해 고민이 많으신 것 같습니다.\n{공감_신뢰감}\n\n{해결책}으로 도움이 될 것입니다.\n\n{진료내용_링크}\n\n이번 기회에 치료를 받으시길 권유합니다!\n\n예약: http://map.naver.com/p/entry/place/21697698\n문의: 010-6584-2874',
+    '내원상담+예약': '안녕하세요 {환자명}님! 저는 {담당자명}입니다.\n\n오늘 내원해주셔서 감사합니다!\n\n{치료결정_감사}\n\n진행 계획:\n{치료계획}\n\n{진료내용_링크}\n\n신경 쓸 점: {특별주의사항}\n\n예약 변경: 010-6584-2874\n\n{예약일}에 뵙겠습니다!',
+    '내원상담+미예약': '안녕하세요 {환자명}님! 저는 {담당자명}입니다.\n\n오늘 내원해주셔서 감사합니다.\n\n{의구심부분}이 걱정되시는군요.\n\n{구체적해결책}으로 해결 가능합니다.\n\n{공감_사례}하셨습니다.\n\n{진료내용_링크}\n\n예약: http://map.naver.com/p/entry/place/21697698\n문의: 010-6584-2874',
+    '리콜종료': '안녕하세요 {환자명}님! 저는 {담당자명}입니다.\n\n지속적인 연락으로 불편을 드렸다면 사과드립니다.\n더 이상 연락드리지 않을 예정입니다.\n\n{치료미실행_아쉬움}\n\n{합병증경고}이 발생할 수 있습니다.\n\n치료가 필요하시면 언제든지 010-6584-2874로 연락주세요!'
 }
 
 fields = {
@@ -105,4 +100,3 @@ with tab3:
     col1.metric("✅ 완료", "5")
     col2.metric("⏳ 대기", "2")
     col3.metric("📅 이번주", "7")
-    st.write("(샘플 데이터)")
