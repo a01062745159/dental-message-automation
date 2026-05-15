@@ -1,6 +1,6 @@
 import streamlit as st
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 import json
 from datetime import datetime
 import pandas as pd
@@ -25,7 +25,7 @@ def get_gsheet():
     try:
         scope = ['https://spreadsheets.google.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
         creds_dict = st.secrets["gsheet_creds"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         gc = gspread.authorize(creds)
         spreadsheet = gc.open_by_key(st.secrets["spreadsheet_id"])
         return spreadsheet
