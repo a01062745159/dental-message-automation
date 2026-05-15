@@ -1,23 +1,12 @@
 import streamlit as st
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import json
 from datetime import datetime
+import json
 
 st.set_page_config(page_title="서울수려한치과", layout="wide")
 st.title("🏥 서울수려한치과 - 자동 문자 발송")
 
-@st.cache_resource
-def get_gsheet():
-    try:
-        scope = ['https://spreadsheets.google.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds_dict = st.secrets["gsheet_creds"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scopes=scope)
-        client = gspread.authorize(creds)
-        return client.open_by_key(st.secrets["spreadsheet_id"])
-    except Exception as e:
-        st.error(f"연동 오류: {e}")
-        return None
+if 'records' not in st.session_state:
+    st.session_state.records = []
 
 templates = {
     '전화상담+예약': '안녕하세요 {환자명}님! 저는 {담당자명}입니다.\n\n감사합니다. {예약일}에 예약해주신 내용 정리해드립니다.\n\n{개인정보}에 대해 잘 기억하고 있습니다.\n\n{걱정부분}에 대해서는 {해결책}으로 도움이 될 것 같습니다.\n\n{진료내용_링크}\n\n병원 위치: {병원위치}\n예약 변경: 010-6584-2874\n\n{예약일}에 뵙겠습니다!\n\n홈페이지: https://www.suryeohan.com/',
@@ -47,56 +36,50 @@ with tab1:
             input_data[field] = st.text_area(field, height=80, key=f"input_{field}")
     
     if st.button("💾 저장"):
-        try:
-            ss = get_gsheet()
-            if ss:
-                sheet_name = f"기록_{situation}"
-                try:
-                    ws = ss.worksheet(sheet_name)
-                except:
-                    ws = ss.add_worksheet(title=sheet_name, rows=100, cols=10)
-                row = [datetime.now().strftime("%Y-%m-%d %H:%M"), situation] + [input_data.get(f, '') for f in fields[situation]]
-                ws.append_row(row)
-                st.success(f"✅ {input_data.get('환자명', '저장')} 완료!")
-        except Exception as e:
-            st.error(f"❌ 오류: {e}")
+        record = {
+            '시간': datetime.now().strftime("%Y-%m-%d %H:%M"),
+            '상황': situation,
+            '데이터': input_data
+        }
+        st.session_state.records.append(record)
+        st.success(f"✅ {input_data.get('환자명', '저장')} 완료!")
+        st.rerun()
 
 with tab2:
     st.subheader("✉️ 메시지 생성")
-    try:
-        ss = get_gsheet()
-        if ss:
-            all_records = []
-            for sheet in ss.worksheets():
-                if sheet.title.startswith('기록_'):
-                    for record in sheet.get_all_values()[1:]:
-                        if record and len(record) > 2:
-                            all_records.append({'시간': record[0], '상황': record[1], '환자명': record[2]})
-            if all_records:
-                idx = st.selectbox("기록 선택", range(len(all_records)), format_func=lambda i: f"{all_records[i]['환자명']} - {all_records[i]['상황']}")
-                record = all_records[idx]
-                if st.button("✉️ 메시지 생성"):
-                    template = templates[record['상황']]
-                    for field in fields[record['상황']]:
-                        template = template.replace(f"{{{field}}}", f"[{field}]")
-                    st.session_state.msg = template
-                if 'msg' in st.session_state:
-                    msg_text = st.text_area("메시지", st.session_state.msg, height=300)
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("📋 복사"):
-                            st.code(msg_text)
-                    with col2:
-                        if st.button("✅ 발송완료"):
-                            st.success(f"✅ {record['환자명']} 발송 완료!")
-            else:
-                st.info("기록이 없습니다.")
-    except Exception as e:
-        st.error(f"❌ 오류: {e}")
+    if st.session_state.records:
+        options = [f"{r['데이터'].get('환자명', '?')} - {r['상황']} ({r['시간']})" for r in st.session_state.records]
+        idx = st.selectbox("기록 선택", range(len(st.session_state.records)), format_func=lambda i: options[i])
+        record = st.session_state.records[idx]
+        
+        if st.button("✉️ 메시지 생성"):
+            template = templates[record['상황']]
+            for field, value in record['데이터'].items():
+                template = template.replace(f"{{{field}}}", value)
+            st.session_state.current_msg = template
+        
+        if 'current_msg' in st.session_state:
+            st.markdown("### 📄 생성된 메시지")
+            msg_text = st.text_area("메시지", st.session_state.current_msg, height=300)
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📋 복사"):
+                    st.code(msg_text)
+                    st.info("✅ 위 코드박스를 드래그해서 복사하세요!")
+            with col2:
+                if st.button("✅ 발송완료"):
+                    st.success(f"✅ {record['데이터'].get('환자명')} 발송 완료!")
+    else:
+        st.info("📭 기록이 없습니다. 통화 기록을 입력해주세요.")
 
 with tab3:
     st.subheader("📊 발송 관리")
     col1, col2, col3 = st.columns(3)
-    col1.metric("✅ 완료", "5")
-    col2.metric("⏳ 대기", "2")
-    col3.metric("📅 이번주", "7")
+    col1.metric("✅ 완료", len([r for r in st.session_state.records if '발송' in r.get('상태', '')]))
+    col2.metric("⏳ 대기", len([r for r in st.session_state.records if '발송' not in r.get('상태', '')]))
+    col3.metric("📅 전체", len(st.session_state.records))
+    
+    if st.session_state.records:
+        st.markdown("### 기록 목록")
+        for i, record in enumerate(st.session_state.records):
+            st.write(f"**{i+1}.** {record['데이터'].get('환자명')} - {record['상황']} ({record['시간']})")
